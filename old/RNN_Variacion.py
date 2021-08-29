@@ -16,6 +16,13 @@ variable_target = 'INPC_General'
 variable_dropeada = 'INPC_Sub' if variable_target == 'INPC_General' else 'INPC_General'
 df = df.drop(variable_dropeada, axis=1)
 
+# crea la variacion del INPC
+df_variacion = pd.DataFrame({'INPC_Actual': df[variable_target], 'INPC_Desfasado': df[variable_target].shift(30), 'anno': df.Year})
+df_variacion['variacion'] = ((df_variacion.INPC_Desfasado/df_variacion.INPC_Actual) - 1) * 100
+print(df_variacion)
+exit()
+
+
 def feature_generator(df, col):
     df['Prev_Day_{}'.format(col)] = df[col].shift(1)
     df['One_Day_Change_{}'.format(col)] = df[col] - df['Prev_Day_{}'.format(col)]
@@ -26,7 +33,8 @@ def feature_generator(df, col):
 #     df = feature_generator(df, feature)
 
 print(df.shape)
-train = df[(df['Year'] >= 2000) & (df['Year'] < 2021)].reset_index(drop=True)
+train = df[(df['Year'] >= 2000) & (df['Year'] < 2020)].reset_index(drop=True)
+valid = df[df['Year'] == 2020].reset_index(drop=True)
 test = df[df['Year'] == 2021].reset_index(drop=True)
 
 from sklearn.preprocessing import MinMaxScaler
@@ -36,6 +44,7 @@ scaler = MinMaxScaler().fit(train)
 columns = train.columns
 
 train_scaled = pd.DataFrame(scaler.transform(train), columns=columns)
+valid_scaled = pd.DataFrame(scaler.transform(valid), columns=columns)
 test_scaled = pd.DataFrame(scaler.transform(test), columns=columns)
 
 print(train_scaled)
@@ -58,23 +67,42 @@ def df_to_generator(df_scaled):
 
 
 train_scaled, train_output, train_generator = df_to_generator(train_scaled)
-# valid_scaled, valid_output, valid_generator = df_to_generator(valid_scaled)
+valid_scaled, valid_output, valid_generator = df_to_generator(valid_scaled)
 test_scaled, test_output, test_generator = df_to_generator(test_scaled)
 
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, SimpleRNN, LSTM
+from tensorflow.keras.layers import Dense, SimpleRNN, LSTM, InputLayer, Conv1D, MaxPooling1D
 
 N_FEATURES = train_scaled.shape[1]
 
 
-def create_rnn():
-    rnn = Sequential()
-    rnn.add(LSTM(16, input_shape=(SEQ_SIZE, N_FEATURES)))
-    rnn.add(Dense(1))
+def create_rnn(type_model='RNN'):
+
+    if type_model == 'RNN':
+        rnn = Sequential()
+        rnn.add(LSTM(16, input_shape=(SEQ_SIZE, N_FEATURES)))
+        rnn.add(Dense(1))
+
+    # CNN
+    elif type_model =='CNN':
+        rnn = Sequential()
+        rnn.add(InputLayer(input_shape=(SEQ_SIZE, N_FEATURES)))
+        rnn.add(Conv1D(filters=32))
+        rnn.add(MaxPooling1D(pool_size=2))
+        rnn.add(LSTM(64))
+        rnn.add(Dense(1))
+
+    elif type_model == 'CNN2':
+        rnn = Sequential()
+        rnn.add(InputLayer(input_shape=(SEQ_SIZE, N_FEATURES)))
+        rnn.add(LSTM(16, return_sequences=True))
+        rnn.add(Conv1D(filters=64))
+        rnn.add(MaxPooling1D(pool_size=2))
+        rnn.add(Dense(1))
 
     rnn.compile(loss=tf.keras.losses.MeanSquaredLogarithmicError(), metrics=METRICS.keys(),
                 optimizer=tf.keras.optimizers.Adam(learning_rate=0.0005))
-    history = rnn.fit(train_generator, shuffle=False, epochs=EPOCH, verbose=2, batch_size=BATCH_SIZE)
+    history = rnn.fit(train_generator, shuffle=False, epochs=EPOCH, verbose=2, batch_size=BATCH_SIZE, validation_data=valid_generator)
 
     hist = pd.DataFrame(history.history)
     hist['epoch'] = history.epoch
@@ -83,13 +111,14 @@ def create_rnn():
         plt.xlabel('Epoch')
         plt.ylabel(METRICS[metric])
         plt.plot(hist['epoch'], hist[metric], label='Training')
+        plt.plot(hist['epoch'], hist['val_' + metric], label='Validation')
         plt.legend()
         plt.show()
 
     return rnn
 
 
-EPOCH = 500
+EPOCH = 250
 METRICS = {'mae': 'Mean Absolute Error (MAE)', 'mse': 'Mean Squared Error (MSE)'}
 model = create_rnn()
 
@@ -117,12 +146,11 @@ y_prediction = model.predict(test_generator).reshape(-1, 1)
 y_true = np.array(test_output)[SEQ_SIZE:].reshape(-1, 1)
 y_prediction_esc, y_true_esc = inv_scaler(y_prediction, scaler), inv_scaler(y_true, scaler)
 
+print(mean_absolute_error(y_train, y_prediction_train))
+print(mean_absolute_error(y_train_esc, y_prediction_train_esc))
 
 print(mean_absolute_error(y_true, y_prediction))
 print(mean_absolute_error(y_true_esc, y_prediction_esc))
-
-print(mean_absolute_error(y_train, y_prediction_train))
-print(mean_absolute_error(y_train_esc, y_prediction_train_esc))
 
 
 def plot_results(predictions, true_values):
