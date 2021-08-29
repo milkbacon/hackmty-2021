@@ -1,5 +1,4 @@
 import pandas as pd
-import os
 import matplotlib.pyplot as plt
 import tensorflow as tf
 available_devices = tf.config.experimental.list_physical_devices('GPU')
@@ -80,9 +79,6 @@ def create_rnn():
     hist = pd.DataFrame(history.history)
     hist['epoch'] = history.epoch
 
-    hist = pd.DataFrame(history.history)
-    hist['epoch'] = history.epoch
-
     for metric in METRICS.keys():
         plt.xlabel('Epoch')
         plt.ylabel(METRICS[metric])
@@ -135,7 +131,6 @@ def plot_results(predictions, true_values):
     plt.title('True and predicted value')
     plt.xlabel('Index')
     plt.ylabel('Dato')
-    plt.xticks(train_output.iloc[SEQ_SIZE:, :].loc[:, 'Month'])
     plt.legend()
     plt.show()
 
